@@ -1,23 +1,42 @@
 require('http').createServer((_,res)=>res.end('Sydaah Bot Live')).listen(process.env.PORT||3000,()=>console.log('PORT OK'))
 const fs=require('fs')
-if(fs.existsSync('./session')) fs.rmSync('./session',{recursive:true,force:true})
-console.log('Old session deleted - fresh start')
 const { default: makeWASocket, useMultiFileAuthState, delay } = require("@whiskeysockets/baileys")
-const pino = require("pino")
-async function startBot(){
-const { state, saveCreds } = await useMultiFileAuthState('./session')
-const sock = makeWASocket({logger:pino({level:"silent"}),auth:state,browser:["Sydaah","Chrome","121.0"]})
-if(!sock.authState.creds.registered){
-await delay(3000)
-let phone=(process.env.PHONE_NUMBER||"254704048845").replace(/[^0-9]/g,'')
-console.log("Number:",phone)
-try{
-let code=await sock.requestPairingCode(phone)
-console.log(`\n===== NEW CODE: ${code} =====\nWeka haraka ndani ya 25 sec!\n`)}catch(e){console.log(e.message)}}
-sock.ev.on("creds.update",saveCreds)
-sock.ev.on("connection.update",async(s)=>{
-if(s.connection==="open"){console.log("✅ CONNECTED! Bot iko Live!")}
-if(s.connection==="close"){console.log("Close, restart...");await delay(3000);startBot()}
-})
+const pino=require("pino")
+
+async function createSessionFromEnv(){
+  const sessionId = process.env.SESSION_ID
+  if(!sessionId || fs.existsSync('./session/creds.json')) return
+  try{
+    let id = sessionId.includes('~')? sessionId.split('~')[1] : sessionId
+    let buff = Buffer.from(id, 'base64').toString('utf-8')
+    let data = JSON.parse(buff)
+    if(!fs.existsSync('./session')) fs.mkdirSync('./session',{recursive:true})
+    let credsData = data.creds || data
+    fs.writeFileSync('./session/creds.json', JSON.stringify(credsData, null, 2))
+    console.log('✅ SESSION_ID loaded')
+  }catch(e){
+    console.log('Decode error:', e.message)
+  }
 }
+
+async function startBot(){
+  await createSessionFromEnv()
+  const { state, saveCreds } = await useMultiFileAuthState('./session')
+  const sock = makeWASocket({logger:pino({level:"silent"}),auth:state,browser:["Sydaah","Chrome","121.0"]})
+  sock.ev.on("creds.update", saveCreds)
+  sock.ev.on("connection.update", async(s)=>{
+    const { connection } = s
+    if(connection==="open") console.log("✅ SYDAAH CONNECTED! Bot iko Live!")
+    if(connection==="close") { console.log("Restart..."); await delay(3000); startBot() }
+  })
+
+  sock.ev.on("messages.upsert", async(m)=>{
+    const msg = m.messages[0]
+    if(!msg.message) return
+    const from = msg.key.remoteJid
+    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || ""
+    if(text.toLowerCase()==="ping") await sock.sendMessage(from, {text:"Pong! Sydaah Bot Live ✅"})
+  })
+}
+
 startBot()
