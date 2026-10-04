@@ -5,15 +5,29 @@ const pino=require("pino")
 
 async function createSessionFromEnv(){
   const sessionId = process.env.SESSION_ID
-  if(!sessionId || fs.existsSync('./session/creds.json')) return
+  if(!sessionId) return
   try{
-    let id = sessionId.includes('~')? sessionId.split('~')[1] : sessionId
-    let buff = Buffer.from(id, 'base64').toString('utf-8')
-    let data = JSON.parse(buff)
     if(!fs.existsSync('./session')) fs.mkdirSync('./session',{recursive:true})
-    let credsData = data.creds || data
-    fs.writeFileSync('./session/creds.json', JSON.stringify(credsData, null, 2))
-    console.log('✅ SESSION_ID loaded')
+    let id = sessionId.includes('~')? sessionId.split('~')[1] : sessionId
+    let buffer = Buffer.from(id, 'base64')
+
+    // Kama ni ZIP (PK)
+    if(buffer[0]==0x50 && buffer[1]==0x4B){
+      console.log('ZIP session detected, extracting...')
+      fs.writeFileSync('./temp.zip', buffer)
+      const AdmZip = require('adm-zip')
+      const zip = new AdmZip('./temp.zip')
+      zip.extractAllTo('./session', true)
+      fs.unlinkSync('./temp.zip')
+      console.log('✅ ZIP Session extracted!')
+    } else {
+      // Kama ni JSON
+      let jsonStr = buffer.toString('utf-8')
+      let data = JSON.parse(jsonStr)
+      let credsData = data.creds || data
+      fs.writeFileSync('./session/creds.json', JSON.stringify(credsData, null, 2))
+      console.log('✅ JSON Session loaded!')
+    }
   }catch(e){
     console.log('Decode error:', e.message)
   }
@@ -29,7 +43,6 @@ async function startBot(){
     if(connection==="open") console.log("✅ SYDAAH CONNECTED! Bot iko Live!")
     if(connection==="close") { console.log("Restart..."); await delay(3000); startBot() }
   })
-
   sock.ev.on("messages.upsert", async(m)=>{
     const msg = m.messages[0]
     if(!msg.message) return
@@ -38,5 +51,4 @@ async function startBot(){
     if(text.toLowerCase()==="ping") await sock.sendMessage(from, {text:"Pong! Sydaah Bot Live ✅"})
   })
 }
-
 startBot()
